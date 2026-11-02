@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from html import escape
 import json
+from html import escape
 
 from .models import ValidationReport
 
