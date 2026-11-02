@@ -49,4 +49,6 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
+# Preserve long operator-facing guidance and embedded HTML template strings; all other lint rules remain enabled.
+ignore = ["E501"]
 select = ["E", "F", "I", "UP", "B"]
