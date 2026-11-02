@@ -128,6 +128,8 @@ def test_sensitive_coordinate_values_are_not_echoed_in_report():
             {
                 "occurrenceID": "private-observation",
                 "scientificName": "Panthera tigris",
+                "basisOfRecord": "private-site-code-742",
+                "eventDate": "private-site-code-742",
                 "decimalLatitude": "30.123456",
                 "decimalLongitude": "71.654321",
             }
@@ -136,6 +138,7 @@ def test_sensitive_coordinate_values_are_not_echoed_in_report():
     rendered = render_json(report) + render_text(report) + render_html(report)
     assert "30.123456" not in rendered
     assert "71.654321" not in rendered
+    assert "private-site-code-742" not in rendered
 
 
 def test_not_recorded_datum_is_an_explicit_value_not_a_missing_field():
@@ -310,3 +313,4 @@ def test_cli_can_select_excel_worksheet(tmp_path: Path, capsys):
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "Rows checked: 1" in output
+
