@@ -247,12 +247,12 @@ def _validate_occurrence(rows: list[dict[str, str]], report: ValidationReport) -
         if _blank(basis):
             _issue(report, "warning", "basis_of_record_missing", "basisOfRecord is empty.", "Choose the appropriate Darwin Core record type, such as HumanObservation or MachineObservation.", row_number, "basisOfRecord")
         elif basis not in _BASIS_OF_RECORD:
-            _issue(report, "error", "basis_of_record_unknown", f"basisOfRecord '{basis}' is not in the recognized Darwin Core class vocabulary used by this validator.", "Check the current Darwin Core vocabulary and use the exact controlled term.", row_number, "basisOfRecord")
+            _issue(report, "error", "basis_of_record_unknown", "basisOfRecord is not in the recognized Darwin Core class vocabulary used by this validator.", "Check the current Darwin Core vocabulary and use the exact controlled term.", row_number, "basisOfRecord")
 
         if _blank(event_date):
             _issue(report, "warning", "event_date_missing", "eventDate is empty.", "Record the observation date or the best-supported date interval.", row_number, "eventDate")
         elif not _valid_event_date(event_date):
-            _issue(report, "error", "event_date_invalid", f"eventDate '{event_date}' is not a supported ISO 8601 date or interval.", "Use an ISO 8601 date, partial date, datetime, or valid interval.", row_number, "eventDate")
+            _issue(report, "error", "event_date_invalid", "eventDate is not a supported ISO 8601 date or interval.", "Use an ISO 8601 date, partial date, datetime, or valid interval.", row_number, "eventDate")
 
         status = row.get("occurrenceStatus", "").strip()
         if status and status.casefold() not in {"present", "absent"}:
@@ -278,7 +278,7 @@ def _validate_camera_trap(rows: list[dict[str, str]], report: ValidationReport) 
         if _blank(row.get("eventDate", "")):
             _issue(report, "warning", "event_date_missing", "eventDate is empty.", "Record the deployment, sampling, or detection date as appropriate for this table.", row_number, "eventDate")
         elif not _valid_event_date(row["eventDate"].strip()):
-            _issue(report, "error", "event_date_invalid", f"eventDate '{row['eventDate']}' is not a supported ISO 8601 date or interval.", "Use an ISO 8601 date, partial date, datetime, or valid interval.", row_number, "eventDate")
+            _issue(report, "error", "event_date_invalid", "eventDate is not a supported ISO 8601 date or interval.", "Use an ISO 8601 date, partial date, datetime, or valid interval.", row_number, "eventDate")
         if _blank(row.get("locationID", "")):
             _issue(report, "warning", "location_id_missing", "locationID is empty.", "Use a stable site or camera location identifier; avoid exposing sensitive site names publicly.", row_number, "locationID")
         if _blank(row.get("samplingProtocol", "")):
@@ -565,3 +565,4 @@ def validate_file(
         _issue(report, "error", "file_unreadable", f"Could not read the input file ({type(exc).__name__}).", "Check file permissions and whether another process is locking the file.")
         return report
     return validate_bytes(data, filename=file_path.name, profile=profile, required_fields=required_fields, sheet=sheet)
+
