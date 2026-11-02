@@ -11,10 +11,10 @@ import datetime as dt
 import io
 import math
 import re
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Iterable, Mapping
 
-from .models import Issue, ValidationReport, Severity
+from .models import Issue, Severity, ValidationReport
 
 PROFILES = ("occurrence", "camera-trap")
 
