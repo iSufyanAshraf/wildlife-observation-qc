@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wildlife-observation-qc"
-version = "0.1.0"
-description = "A local-first quality checker for wildlife occurrence and camera-trap survey CSV data."
+version = "0.2.0"
+description = "A local-first quality checker for wildlife occurrence and camera-trap survey datasets."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -27,7 +27,8 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.6", "build>=1.2"]
+excel = ["openpyxl>=3.1.5"]
+dev = ["pytest>=8.0", "ruff>=0.6", "build>=1.2", "openpyxl>=3.1.5"]
 
 [project.scripts]
 wildlife-qc = "wildlife_qc.cli:main"
@@ -49,6 +50,6 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-# Preserve long operator-facing guidance and embedded HTML template strings; all other lint rules remain enabled.
+# Preserve long operator-facing guidance and embedded HTML template strings.
 ignore = ["E501"]
 select = ["E", "F", "I", "UP", "B"]
