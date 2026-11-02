@@ -16,6 +16,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from .models import Issue, Severity, ValidationReport
+
 PROFILES = ("occurrence", "camera-trap")
 
 # Case- and punctuation-insensitive aliases make common spreadsheet exports easier
