@@ -1,6 +1,6 @@
 # Validation rule reference
 
-This reference describes the rules shipped in version 0.1.0. A warning is an advisory completeness or consistency concern; an error means the supplied value violates a rule implemented by this tool. The severity is not a judgement about the ecological importance of the observation.
+This reference describes the rules shipped in version 0.2.0. A warning is an advisory completeness or consistency concern; an error means the supplied value violates a rule implemented by this tool. The severity is not a judgement about the ecological importance of the observation.
 
 ## Occurrence profile
 
@@ -44,6 +44,13 @@ This reference describes the rules shipped in version 0.1.0. A warning is an adv
 | `sample_size_value_missing` | Warning | A unit is supplied without a value. |
 | `event_duration_invalid` | Error | Supplied event duration is non-numeric, non-finite, or not positive. |
 | `event_duration_unit_missing` | Warning | An event duration is supplied without its unit. |
+
+## Input formats and workbook handling
+
+- CSV and TSV files are read as UTF-8 (with or without a byte-order mark).
+- Excel `.xlsx` support is optional and uses `openpyxl`; the default is the first worksheet. A worksheet can also be selected by exact name or zero-based index.
+- Formula cells are read using cached values when available. A formula without a saved result may be treated as an empty cell.
+- Excel workbook archive size and compression limits are applied as a defensive check before parsing. Legacy `.xls` and macro-enabled `.xlsm` files are not supported.
 
 ## Interpretation notes
 
