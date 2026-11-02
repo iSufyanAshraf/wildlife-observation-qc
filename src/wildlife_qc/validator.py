@@ -13,9 +13,9 @@ import math
 import re
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+from zipfile import ZipFile
 
 from .models import Issue, Severity, ValidationReport
-
 PROFILES = ("occurrence", "camera-trap")
 
 # Case- and punctuation-insensitive aliases make common spreadsheet exports easier
@@ -335,29 +335,13 @@ def validate_rows(
     return report
 
 
-def validate_file(
-    path: str | Path,
-    profile: str = "occurrence",
-    required_fields: Iterable[str] = (),
+
+def _parse_csv_text(
+    text: str,
+    report: ValidationReport,
+    profile: str,
+    required_fields: Iterable[str],
 ) -> ValidationReport:
-    """Read a CSV file and return a report without modifying or uploading the source."""
-    file_path = Path(path)
-    report = ValidationReport(source=file_path.name, profile=profile)
-    if profile not in PROFILES:
-        raise ValueError(f"Unknown profile '{profile}'. Choose one of: {', '.join(PROFILES)}")
-    if not file_path.is_file():
-        _issue(report, "error", "file_not_found", f"Input file '{file_path}' does not exist.", "Check the path and try again.")
-        return report
-
-    try:
-        text = file_path.read_text(encoding="utf-8-sig")
-    except UnicodeDecodeError:
-        _issue(report, "error", "encoding_unsupported", "The file is not valid UTF-8 text.", "Export the CSV as UTF-8 or UTF-8 with BOM.")
-        return report
-    except OSError as exc:
-        _issue(report, "error", "file_unreadable", f"Could not read the input file: {exc}", "Check file permissions and whether another process is locking the file.")
-        return report
-
     if not text.strip():
         _issue(report, "error", "file_empty", "The input file is empty.", "Provide a CSV with a header row and at least one data row.")
         return report
@@ -368,7 +352,7 @@ def validate_file(
             dialect = csv.Sniffer().sniff(sample, delimiters=",\t;|")
             delimiter = dialect.delimiter
         except csv.Error:
-            delimiter = ","
+            delimiter = "\t" if "\t" in sample and "," not in sample else ","
         reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
         raw_headers = reader.fieldnames or []
         if not raw_headers:
@@ -390,9 +374,193 @@ def validate_file(
                 if raw_key is not None:
                     row[_canonical_header(raw_key)] = "" if value is None else value.strip()
             rows.append(row)
-        validated = validate_rows(rows, profile=profile, source=file_path.name, columns=headers, required_fields=required_fields)
+        validated = validate_rows(
+            rows,
+            profile=profile,
+            source=report.source,
+            columns=headers,
+            required_fields=required_fields,
+        )
         validated.issues[:0] = report.issues
         return validated
     except csv.Error as exc:
         _issue(report, "error", "csv_parse_error", f"CSV parsing failed: {exc}", "Check the source file for broken quoting or malformed rows.")
         return report
+
+
+def _parse_excel_bytes(
+    data: bytes,
+    report: ValidationReport,
+    profile: str,
+    required_fields: Iterable[str],
+    sheet: str | int | None,
+) -> ValidationReport:
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        _issue(
+            report,
+            "error",
+            "excel_dependency_missing",
+            "Excel support is not installed in this Python environment.",
+            'Install the optional Excel dependency with: python -m pip install "wildlife-observation-qc[excel]".',
+        )
+        return report
+
+    try:
+        with ZipFile(io.BytesIO(data)) as archive:
+            members = archive.infolist()
+            uncompressed_size = sum(member.file_size for member in members)
+            unsafe_ratio = any(
+                member.compress_size > 0 and member.file_size / member.compress_size > 200
+                for member in members
+            )
+            if (
+                len(members) > 1000
+                or uncompressed_size > 100 * 1024 * 1024
+                or any(member.file_size > 50 * 1024 * 1024 for member in members)
+                or unsafe_ratio
+            ):
+                _issue(
+                    report,
+                    "error",
+                    "excel_archive_limits_exceeded",
+                    "The workbook exceeds the safety limits for archive size or compression ratio.",
+                    "Use a smaller, normally compressed .xlsx workbook and retry.",
+                )
+                return report
+        workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception as exc:
+        _issue(
+            report,
+            "error",
+            "excel_read_error",
+            f"The workbook could not be opened ({type(exc).__name__}).",
+            "Check that the file is a valid, unencrypted .xlsx workbook and is not damaged.",
+        )
+        return report
+
+    try:
+        if not workbook.worksheets:
+            _issue(report, "error", "worksheet_missing", "The workbook does not contain a worksheet.", "Add a worksheet with a header row and survey records.")
+            return report
+        try:
+            if sheet is None:
+                worksheet = workbook.worksheets[0]
+            elif isinstance(sheet, int):
+                if sheet < 0:
+                    raise IndexError
+                worksheet = workbook.worksheets[sheet]
+            else:
+                worksheet = workbook[sheet]
+        except (IndexError, KeyError):
+            available = ", ".join(workbook.sheetnames)
+            _issue(
+                report,
+                "error",
+                "worksheet_not_found",
+                "The requested worksheet was not found.",
+                f"Choose a worksheet by its exact name or zero-based index. Available sheets: {available}.",
+            )
+            return report
+
+        values = worksheet.iter_rows(values_only=True)
+        first_row = next(values, None)
+        if first_row is None:
+            _issue(report, "error", "header_missing", "The selected worksheet is empty.", "Add a header row containing survey field names.")
+            return report
+
+        raw_headers = ["" if value is None else str(value).strip() for value in first_row]
+        while raw_headers and not raw_headers[-1]:
+            raw_headers.pop()
+        if not raw_headers:
+            _issue(report, "error", "header_missing", "The selected worksheet has no header values.", "Add a header row containing survey field names.")
+            return report
+
+        headers = [_canonical_header(header) for header in raw_headers]
+        report.columns = headers
+        if len(set(headers)) != len(headers):
+            _issue(report, "error", "duplicate_columns", "Two or more worksheet columns resolve to the same field name.", "Rename duplicate columns so every field has one unambiguous header.")
+            return report
+
+        rows: list[dict[str, str]] = []
+        for row_number, values_row in enumerate(values, start=2):
+            row_values = list(values_row)
+            if any(value is not None for value in row_values[len(headers):]):
+                _issue(report, "error", "row_has_extra_values", "A worksheet row contains values beyond the header columns.", "Check for populated cells to the right of the header fields.", row_number)
+            row = {}
+            for index, header in enumerate(headers):
+                value = row_values[index] if index < len(row_values) else None
+                row[header] = "" if value is None else str(value).strip()
+            rows.append(row)
+
+        validated = validate_rows(
+            rows,
+            profile=profile,
+            source=report.source,
+            columns=headers,
+            required_fields=required_fields,
+        )
+        validated.issues[:0] = report.issues
+        return validated
+    finally:
+        workbook.close()
+
+
+def validate_bytes(
+    data: bytes,
+    filename: str = "upload.csv",
+    profile: str = "occurrence",
+    required_fields: Iterable[str] = (),
+    sheet: str | int | None = None,
+) -> ValidationReport:
+    """Validate CSV/TSV or XLSX bytes without writing the input to disk."""
+    if profile not in PROFILES:
+        raise ValueError(f"Unknown profile '{profile}'. Choose one of: {', '.join(PROFILES)}")
+
+    file_name = filename.replace("\\", "/").rsplit("/", 1)[-1] or "upload.csv"
+    report = ValidationReport(source=file_name, profile=profile)
+    suffix = Path(file_name).suffix.casefold()
+
+    if suffix == ".xlsx":
+        return _parse_excel_bytes(data, report, profile, required_fields, sheet)
+    if suffix not in {".csv", ".tsv", ".txt"}:
+        _issue(
+            report,
+            "error",
+            "file_type_unsupported",
+            "This file type is not supported.",
+            "Use a UTF-8 CSV/TSV file or an Excel .xlsx workbook.",
+        )
+        return report
+
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        _issue(report, "error", "encoding_unsupported", "The file is not valid UTF-8 text.", "Export the CSV as UTF-8 or UTF-8 with BOM.")
+        return report
+    return _parse_csv_text(text, report, profile, required_fields)
+
+
+def validate_file(
+    path: str | Path,
+    profile: str = "occurrence",
+    required_fields: Iterable[str] = (),
+    sheet: str | int | None = None,
+) -> ValidationReport:
+    """Read a CSV/TSV or XLSX file without modifying the source."""
+    file_path = Path(path)
+    if profile not in PROFILES:
+        raise ValueError(f"Unknown profile '{profile}'. Choose one of: {', '.join(PROFILES)}")
+    if not file_path.is_file():
+        report = ValidationReport(source=file_path.name, profile=profile)
+        _issue(report, "error", "file_not_found", f"Input file '{file_path}' does not exist.", "Check the path and try again.")
+        return report
+
+    try:
+        data = file_path.read_bytes()
+    except OSError as exc:
+        report = ValidationReport(source=file_path.name, profile=profile)
+        _issue(report, "error", "file_unreadable", f"Could not read the input file ({type(exc).__name__}).", "Check file permissions and whether another process is locking the file.")
+        return report
+    return validate_bytes(data, filename=file_path.name, profile=profile, required_fields=required_fields, sheet=sheet)
