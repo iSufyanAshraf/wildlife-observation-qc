@@ -1,0 +1,32 @@
+name: Bug report
+description: Report an incorrect result or unexpected failure.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the issue without including real wildlife locations or personal data.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Wildlife Observation QC version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Share a synthetic example with coordinates replaced by safe dummy values.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true

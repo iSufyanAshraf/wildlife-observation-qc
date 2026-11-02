@@ -1,0 +1,4 @@
+occurrenceID,scientificName,basisOfRecord,eventDate,decimalLatitude,decimalLongitude,geodeticDatum,coordinateUncertaintyInMeters,individualCount,countryCode,recordedBy
+sample-occ-001,Axis axis,HumanObservation,2026-09-12,31.5204,74.3587,WGS84,15,2,PK,Field Team A
+sample-occ-002,Canis aureus,HumanObservation,2026-09,32.1877,74.1945,WGS84,25,1,PK,Field Team B
+sample-occ-003,Panthera pardus,MachineObservation,2026-09-14T02:31:00Z,34.0100,73.4000,WGS84,40,1,PK,Camera Trap 07

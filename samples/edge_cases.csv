@@ -1,0 +1,4 @@
+occurrenceID,scientificName,basisOfRecord,eventDate,decimalLatitude,decimalLongitude,geodeticDatum,coordinateUncertaintyInMeters,individualCount,countryCode
+edge-001,Axis axis,HumanObservation,2026-13-44,31.5,74.3,WGS84,0,2,PK
+edge-001,,NotARecord,not-a-date,95,181,,15,-1,pk
+edge-003,Canis aureus,HumanObservation,2026-09-11,32.1,,WGS84,20,1,PK

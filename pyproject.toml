@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wildlife-observation-qc"
+version = "0.1.0"
+description = "A local-first quality checker for wildlife occurrence and camera-trap survey CSV data."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Wildlife Observation QC contributors" }]
+keywords = ["wildlife", "biodiversity", "darwin-core", "camera-trap", "survey-data", "data-quality", "conservation", "gbif"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6", "build>=1.2"]
+
+[project.scripts]
+wildlife-qc = "wildlife_qc.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/iSufyanAshraf/wildlife-observation-qc"
+Repository = "https://github.com/iSufyanAshraf/wildlife-observation-qc"
+Issues = "https://github.com/iSufyanAshraf/wildlife-observation-qc/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

@@ -1,0 +1,3 @@
+eventID,eventDate,locationID,samplingProtocol,sampleSizeValue,sampleSizeUnit,eventDurationValue,eventDurationUnit,decimalLatitude,decimalLongitude,geodeticDatum,coordinateUncertaintyInMeters
+cam-001-deploy-01,2026-09-01,site-001,motion-triggered camera trap,14,camera-days,14,days,31.5204,74.3587,WGS84,20
+cam-002-deploy-01,2026-09-03,site-002,motion-triggered camera trap,21,camera-days,21,days,32.1877,74.1945,WGS84,30

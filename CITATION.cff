@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use Wildlife Observation QC in a publication, please cite the repository and release you used."
+title: "Wildlife Observation QC"
+version: 0.1.0
+date-released: 2026-11-02
+type: software
+license: MIT
+repository-code: "https://github.com/iSufyanAshraf/wildlife-observation-qc"
+abstract: "A local-first quality checker for wildlife occurrence and camera-trap survey CSV data."
