@@ -15,7 +15,6 @@ from urllib.parse import urlsplit
 from .render import render_html
 from .validator import PROFILES, validate_bytes
 
-
 _DASHBOARD_HTML = """<!doctype html>
 <html lang="en">
 <head>
