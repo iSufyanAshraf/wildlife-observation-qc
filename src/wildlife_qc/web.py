@@ -178,25 +178,39 @@ def make_handler(max_upload_bytes: int = 20 * 1024 * 1024) -> type[BaseHTTPReque
             self.wfile.write(body)
 
         def _is_local_request(self) -> bool:
-            # The server is bound to 127.0.0.1, but also verify the peer and
-            # Host header. This prevents access through a remote interface or
-            # a DNS-rebinding hostname while accepting normal browser variants.
+            # Require a loopback TCP peer and a local Host to mitigate remote
+            # access and DNS-rebinding attempts.
             try:
                 from ipaddress import ip_address
 
                 if not ip_address(self.client_address[0]).is_loopback:
                     return False
-                host_name = (urlsplit("//" + self.headers.get("Host", "")).hostname or "").lower().rstrip(".")
+                host = urlsplit("//" + self.headers.get("Host", ""))
+                host_name = (host.hostname or "").lower().rstrip(".")
             except (ValueError, TypeError):
                 return False
-            if host_name not in {"127.0.0.1", "localhost", "::1"}:
-                return False
+            return host_name in {"127.0.0.1", "localhost"}
 
-            # Do not gate local form uploads on the optional Origin header:
-            # browser privacy settings/extensions can omit or rewrite it.
-            # The loopback peer check plus strict Host allowlist above remain
-            # the access boundary; the server never reads local files itself.
-            return True
+        def _is_same_origin_post(self) -> bool:
+            # Browsers normally send Origin on form POSTs. When present, require
+            # an exact local origin (including port). For non-browser clients
+            # that omit Origin, reject an explicit cross-site Fetch Metadata flag.
+            origin = self.headers.get("Origin")
+            if not origin:
+                return self.headers.get("Sec-Fetch-Site", "").lower() != "cross-site"
+            try:
+                parsed_origin = urlsplit(origin)
+                host = urlsplit("//" + self.headers.get("Host", ""))
+                origin_port = parsed_origin.port or (80 if parsed_origin.scheme == "http" else None)
+                host_port = host.port or 80
+                return (
+                    parsed_origin.scheme == "http"
+                    and (parsed_origin.hostname or "").lower().rstrip(".") in {"127.0.0.1", "localhost"}
+                    and parsed_origin.hostname == host.hostname
+                    and origin_port == host_port
+                )
+            except ValueError:
+                return False
 
         def do_GET(self) -> None:  # noqa: N802
             if not self._is_local_request():
@@ -211,8 +225,8 @@ def make_handler(max_upload_bytes: int = 20 * 1024 * 1024) -> type[BaseHTTPReque
                 self._send(HTTPStatus.NOT_FOUND, b"Not found", "text/plain; charset=utf-8")
 
         def do_POST(self) -> None:  # noqa: N802
-            if not self._is_local_request():
-                self._send(HTTPStatus.FORBIDDEN, b"Local requests only", "text/plain; charset=utf-8")
+            if not self._is_local_request() or not self._is_same_origin_post():
+                self._send(HTTPStatus.FORBIDDEN, b"Local same-origin requests only", "text/plain; charset=utf-8")
                 return
             if urlsplit(self.path).path != "/validate":
                 self._send(HTTPStatus.NOT_FOUND, b"Not found", "text/plain; charset=utf-8")
