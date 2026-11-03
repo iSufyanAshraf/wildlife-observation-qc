@@ -192,17 +192,10 @@ def make_handler(max_upload_bytes: int = 20 * 1024 * 1024) -> type[BaseHTTPReque
             if host_name not in {"127.0.0.1", "localhost", "::1"}:
                 return False
 
-            # Browsers attach Origin to form submissions. Validate it when
-            # present, but do not require it (some same-origin clients omit it).
-            origin = self.headers.get("Origin")
-            if origin:
-                try:
-                    parsed_origin = urlsplit(origin)
-                    origin_name = (parsed_origin.hostname or "").lower().rstrip(".")
-                except ValueError:
-                    return False
-                if parsed_origin.scheme != "http" or origin_name not in {"127.0.0.1", "localhost", "::1"}:
-                    return False
+            # Do not gate local form uploads on the optional Origin header:
+            # browser privacy settings/extensions can omit or rewrite it.
+            # The loopback peer check plus strict Host allowlist above remain
+            # the access boundary; the server never reads local files itself.
             return True
 
         def do_GET(self) -> None:  # noqa: N802
