@@ -289,7 +289,10 @@ def test_local_dashboard_serves_form_and_validates_upload_in_memory():
         request = Request(
             base_url + "/validate",
             data=body,
-            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Origin": base_url,
+            },
             method="POST",
         )
         with urlopen(request) as response:
@@ -298,11 +301,77 @@ def test_local_dashboard_serves_form_and_validates_upload_in_memory():
             assert "Wildlife Data Quality Report" in result
             assert "Download JSON report" in result
             assert "obs-1" not in result
+
+        cross_site_request = Request(
+            base_url + "/validate",
+            data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Origin": "http://attacker.example",
+            },
+            method="POST",
+        )
+        try:
+            urlopen(cross_site_request)
+            raise AssertionError("The dashboard should reject cross-origin form submissions.")
+        except Exception as exc:
+            assert getattr(exc, "code", None) == 403
     finally:
         server.shutdown()
         server.server_close()
         worker.join(timeout=2)
 
+
+
+def test_header_only_csv_is_not_reported_as_a_pass():
+    from wildlife_qc.validator import validate_bytes
+
+    report = validate_bytes(
+        b"occurrenceID,scientificName,basisOfRecord,eventDate\\n",
+        filename="empty.csv",
+    )
+    assert report.rows_checked == 0
+    assert "no_data_rows" in {issue.code for issue in report.issues}
+    assert not report.passed
+
+
+def test_individual_count_must_be_a_whole_number():
+    report = validate_rows(
+        [{"occurrenceID": "x-1", "scientificName": "Axis axis", "individualCount": "1.5"}]
+    )
+    assert "individual_count_invalid" in {issue.code for issue in report.issues}
+
+
+def test_invalid_and_reversed_compact_date_intervals_are_rejected():
+    from wildlife_qc.validator import _valid_event_date
+
+    assert not _valid_event_date("2026-02-30/31")
+    assert not _valid_event_date("2026-04-15/10")
+    assert _valid_event_date("2026-04-11/15")
+
+
+def test_input_size_and_column_limits_are_enforced(monkeypatch):
+    from wildlife_qc import validator
+
+    monkeypatch.setattr(validator, "MAX_INPUT_BYTES", 5)
+    too_large = validator.validate_bytes(b"123456", filename="large.csv")
+    assert "input_too_large" in {issue.code for issue in too_large.issues}
+
+    monkeypatch.setattr(validator, "MAX_INPUT_BYTES", 1024 * 1024)
+    monkeypatch.setattr(validator, "MAX_COLUMNS", 2)
+    too_wide = validator.validate_bytes(b"a,b,c\\n1,2,3\\n", filename="wide.csv")
+    assert "column_limit_exceeded" in {issue.code for issue in too_wide.issues}
+
+
+def test_csv_row_limit_is_enforced(monkeypatch):
+    from wildlife_qc import validator
+
+    monkeypatch.setattr(validator, "MAX_DATA_ROWS", 1)
+    report = validator.validate_bytes(
+        b"occurrenceID,scientificName\\na,Axis axis\\nb,Canis aureus\\n",
+        filename="many.csv",
+    )
+    assert "row_limit_exceeded" in {issue.code for issue in report.issues}
 
 def test_cli_can_select_excel_worksheet(tmp_path: Path, capsys):
     from wildlife_qc.cli import main
