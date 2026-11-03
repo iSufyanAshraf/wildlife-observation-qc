@@ -284,8 +284,8 @@ def start_dashboard(port: int = 8765, max_upload_mb: int = 20) -> None:
     """Start the dashboard on loopback only; it is not exposed to the network."""
     if not 1 <= port <= 65535:
         raise ValueError("Port must be between 1 and 65535.")
-    if max_upload_mb < 1 or max_upload_mb > 500:
-        raise ValueError("Maximum upload size must be between 1 and 500 MB.")
+    if max_upload_mb < 1 or max_upload_mb > 100:
+        raise ValueError("Maximum upload size must be between 1 and 100 MB.")
     max_upload_bytes = max_upload_mb * 1024 * 1024
     server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(max_upload_bytes))
     print(f"Wildlife Observation QC is running locally: http://127.0.0.1:{port}")
