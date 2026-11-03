@@ -178,14 +178,30 @@ def make_handler(max_upload_bytes: int = 20 * 1024 * 1024) -> type[BaseHTTPReque
             self.wfile.write(body)
 
         def _is_local_request(self) -> bool:
-            host = self.headers.get("Host", "")
-            host_name = urlsplit("//" + host).hostname
-            if host_name not in {"127.0.0.1", "localhost"}:
+            # The server is bound to 127.0.0.1, but also verify the peer and
+            # Host header. This prevents access through a remote interface or
+            # a DNS-rebinding hostname while accepting normal browser variants.
+            try:
+                from ipaddress import ip_address
+
+                if not ip_address(self.client_address[0]).is_loopback:
+                    return False
+                host_name = (urlsplit("//" + self.headers.get("Host", "")).hostname or "").lower().rstrip(".")
+            except (ValueError, TypeError):
                 return False
+            if host_name not in {"127.0.0.1", "localhost", "::1"}:
+                return False
+
+            # Browsers attach Origin to form submissions. Validate it when
+            # present, but do not require it (some same-origin clients omit it).
             origin = self.headers.get("Origin")
             if origin:
-                parsed_origin = urlsplit(origin)
-                if parsed_origin.scheme != "http" or parsed_origin.hostname not in {"127.0.0.1", "localhost"}:
+                try:
+                    parsed_origin = urlsplit(origin)
+                    origin_name = (parsed_origin.hostname or "").lower().rstrip(".")
+                except ValueError:
+                    return False
+                if parsed_origin.scheme != "http" or origin_name not in {"127.0.0.1", "localhost", "::1"}:
                     return False
             return True
 
