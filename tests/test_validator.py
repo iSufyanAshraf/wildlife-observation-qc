@@ -373,6 +373,46 @@ def test_csv_row_limit_is_enforced(monkeypatch):
     )
     assert "row_limit_exceeded" in {issue.code for issue in report.issues}
 
+
+def test_header_only_xlsx_is_not_reported_as_a_pass():
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    from wildlife_qc.validator import validate_bytes
+
+    workbook = Workbook()
+    workbook.active.append(["occurrenceID", "scientificName"])
+    buffer = BytesIO()
+    workbook.save(buffer)
+    workbook.close()
+
+    report = validate_bytes(buffer.getvalue(), filename="empty.xlsx")
+    assert report.rows_checked == 0
+    assert "no_data_rows" in {issue.code for issue in report.issues}
+    assert not report.passed
+
+
+def test_excel_row_limit_is_enforced(monkeypatch):
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    from wildlife_qc import validator
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.append(["occurrenceID", "scientificName"])
+    worksheet.append(["a", "Axis axis"])
+    worksheet.append(["b", "Canis aureus"])
+    buffer = BytesIO()
+    workbook.save(buffer)
+    workbook.close()
+
+    monkeypatch.setattr(validator, "MAX_DATA_ROWS", 1)
+    report = validator.validate_bytes(buffer.getvalue(), filename="many.xlsx")
+    assert "row_limit_exceeded" in {issue.code for issue in report.issues}
+
 def test_cli_can_select_excel_worksheet(tmp_path: Path, capsys):
     from wildlife_qc.cli import main
 
