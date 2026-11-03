@@ -6,6 +6,7 @@ Darwin Core, GBIF validation, taxonomic reconciliation, or spatial analysis.
 
 from __future__ import annotations
 
+import calendar
 import csv
 import datetime as dt
 import io
@@ -18,6 +19,12 @@ from zipfile import ZipFile
 from .models import Issue, Severity, ValidationReport
 
 PROFILES = ("occurrence", "camera-trap")
+
+# Conservative input limits keep accidental or hostile files from consuming
+# unbounded memory in the CLI and local dashboard.
+MAX_INPUT_BYTES = 100 * 1024 * 1024
+MAX_DATA_ROWS = 100_000
+MAX_COLUMNS = 250
 
 # Case- and punctuation-insensitive aliases make common spreadsheet exports easier
 # to validate while keeping Darwin Core's canonical field names in reports.
@@ -99,10 +106,23 @@ def _valid_event_date(value: str) -> bool:
             try:
                 start_date = dt.date.fromisoformat(start)
                 end_day = int(end)
-                return start_date.day <= end_day <= 31
+                last_day = calendar.monthrange(start_date.year, start_date.month)[1]
+                return start_date.day <= end_day <= last_day
             except ValueError:
                 return False
-        return _valid_event_date(start) and _valid_event_date(end)
+        if not (_valid_event_date(start) and _valid_event_date(end)):
+            return False
+        # Compare endpoints when they have the same unambiguous precision.
+        try:
+            if re.fullmatch(r"\d{4}", start) and re.fullmatch(r"\d{4}", end):
+                return int(start) <= int(end)
+            if re.fullmatch(r"\d{4}-\d{2}", start) and re.fullmatch(r"\d{4}-\d{2}", end):
+                return tuple(map(int, start.split("-"))) <= tuple(map(int, end.split("-")))
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", start) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", end):
+                return dt.date.fromisoformat(start) <= dt.date.fromisoformat(end)
+        except ValueError:
+            return False
+        return True
     if re.fullmatch(r"\d{4}", value):
         year = int(value)
         return 1 <= year <= 9999
@@ -261,8 +281,8 @@ def _validate_occurrence(rows: list[dict[str, str]], report: ValidationReport) -
         count_raw = row.get("individualCount", "")
         if not _blank(count_raw):
             count = _number(count_raw)
-            if count is None or math.isnan(count) or count < 0:
-                _issue(report, "error", "individual_count_invalid", "individualCount must be a non-negative number when supplied.", "Enter a valid count; use an empty value when the count is unknown.", row_number, "individualCount")
+            if count is None or math.isnan(count) or count < 0 or not count.is_integer():
+                _issue(report, "error", "individual_count_invalid", "individualCount must be a non-negative whole number when supplied.", "Enter a whole-number count; use an empty value when the count is unknown.", row_number, "individualCount")
 
         country_code = row.get("countryCode", "").strip()
         if country_code and not re.fullmatch(r"[A-Z]{2}", country_code):
@@ -323,6 +343,15 @@ def validate_rows(
     ]
     report = ValidationReport(source=source, profile=profile, rows_checked=len(normalized_rows))
     report.columns = list(columns or (normalized_rows[0].keys() if normalized_rows else []))
+    if not normalized_rows:
+        _issue(
+            report,
+            "error",
+            "no_data_rows",
+            "The input contains a header but no data rows.",
+            "Add at least one survey record before running validation.",
+        )
+        return report
 
     for field_name in required_fields:
         canonical = _canonical_header(field_name)
@@ -361,6 +390,9 @@ def _parse_csv_text(
             return report
 
         headers = [_canonical_header(header or "") for header in raw_headers]
+        if len(headers) > MAX_COLUMNS:
+            _issue(report, "error", "column_limit_exceeded", "The input contains more columns than the safety limit.", f"Reduce the dataset to {MAX_COLUMNS} columns or fewer.")
+            return report
         report.columns = headers
         if len(set(headers)) != len(headers):
             _issue(report, "error", "duplicate_columns", "Two or more CSV columns resolve to the same field name.", "Rename duplicate columns so every field has one unambiguous header.")
@@ -368,6 +400,9 @@ def _parse_csv_text(
 
         rows: list[dict[str, str]] = []
         for row_number, raw_row in enumerate(reader, start=2):
+            if row_number - 2 >= MAX_DATA_ROWS:
+                _issue(report, "error", "row_limit_exceeded", "The input contains more data rows than the safety limit.", f"Split the dataset into files with no more than {MAX_DATA_ROWS} data rows each.")
+                return report
             if None in raw_row:
                 _issue(report, "error", "row_has_extra_values", "A row contains more values than the header has columns.", "Check commas, quotes, and line breaks in the source CSV.", row_number)
             row = {}
@@ -479,6 +514,9 @@ def _parse_excel_bytes(
             return report
 
         headers = [_canonical_header(header) for header in raw_headers]
+        if len(headers) > MAX_COLUMNS:
+            _issue(report, "error", "column_limit_exceeded", "The worksheet contains more columns than the safety limit.", f"Reduce the worksheet to {MAX_COLUMNS} columns or fewer.")
+            return report
         report.columns = headers
         if len(set(headers)) != len(headers):
             _issue(report, "error", "duplicate_columns", "Two or more worksheet columns resolve to the same field name.", "Rename duplicate columns so every field has one unambiguous header.")
@@ -486,6 +524,9 @@ def _parse_excel_bytes(
 
         rows: list[dict[str, str]] = []
         for row_number, values_row in enumerate(values, start=2):
+            if row_number - 2 >= MAX_DATA_ROWS:
+                _issue(report, "error", "row_limit_exceeded", "The worksheet contains more data rows than the safety limit.", f"Split the worksheet into sheets with no more than {MAX_DATA_ROWS} data rows each.")
+                return report
             row_values = list(values_row)
             if any(value is not None for value in row_values[len(headers):]):
                 _issue(report, "error", "row_has_extra_values", "A worksheet row contains values beyond the header columns.", "Check for populated cells to the right of the header fields.", row_number)
@@ -521,6 +562,9 @@ def validate_bytes(
 
     file_name = filename.replace("\\", "/").rsplit("/", 1)[-1] or "upload.csv"
     report = ValidationReport(source=file_name, profile=profile)
+    if len(data) > MAX_INPUT_BYTES:
+        _issue(report, "error", "input_too_large", "The input file exceeds the maximum supported size.", f"Use a file no larger than {MAX_INPUT_BYTES // (1024 * 1024)} MB.")
+        return report
     suffix = Path(file_name).suffix.casefold()
 
     if suffix == ".xlsx":
@@ -559,6 +603,10 @@ def validate_file(
         return report
 
     try:
+        if file_path.stat().st_size > MAX_INPUT_BYTES:
+            report = ValidationReport(source=file_path.name, profile=profile)
+            _issue(report, "error", "input_too_large", "The input file exceeds the maximum supported size.", f"Use a file no larger than {MAX_INPUT_BYTES // (1024 * 1024)} MB.")
+            return report
         data = file_path.read_bytes()
     except OSError as exc:
         report = ValidationReport(source=file_path.name, profile=profile)
