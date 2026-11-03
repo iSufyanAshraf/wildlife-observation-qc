@@ -327,7 +327,7 @@ def test_header_only_csv_is_not_reported_as_a_pass():
     from wildlife_qc.validator import validate_bytes
 
     report = validate_bytes(
-        b"occurrenceID,scientificName,basisOfRecord,eventDate\\n",
+        b"occurrenceID,scientificName,basisOfRecord,eventDate\n",
         filename="empty.csv",
     )
     assert report.rows_checked == 0
@@ -359,7 +359,7 @@ def test_input_size_and_column_limits_are_enforced(monkeypatch):
 
     monkeypatch.setattr(validator, "MAX_INPUT_BYTES", 1024 * 1024)
     monkeypatch.setattr(validator, "MAX_COLUMNS", 2)
-    too_wide = validator.validate_bytes(b"a,b,c\\n1,2,3\\n", filename="wide.csv")
+    too_wide = validator.validate_bytes(b"a,b,c\n1,2,3\n", filename="wide.csv")
     assert "column_limit_exceeded" in {issue.code for issue in too_wide.issues}
 
 
@@ -368,7 +368,7 @@ def test_csv_row_limit_is_enforced(monkeypatch):
 
     monkeypatch.setattr(validator, "MAX_DATA_ROWS", 1)
     report = validator.validate_bytes(
-        b"occurrenceID,scientificName\\na,Axis axis\\nb,Canis aureus\\n",
+        b"occurrenceID,scientificName\na,Axis axis\nb,Canis aureus\n",
         filename="many.csv",
     )
     assert "row_limit_exceeded" in {issue.code for issue in report.issues}
