@@ -15,7 +15,7 @@ This reference describes the rules shipped in version 0.2.0. A warning is an adv
 | `event_date_missing` | Warning | `eventDate` is blank. |
 | `event_date_invalid` | Error | The value is not a supported ISO 8601 date, partial date, datetime, or interval. |
 | `occurrence_status_unusual` | Warning | `occurrenceStatus` is not `present` or `absent`. |
-| `individual_count_invalid` | Error | A supplied `individualCount` is negative or non-numeric. |
+| `individual_count_invalid` | Error | A supplied `individualCount` is negative, non-numeric, non-finite, or not a whole number. |
 | `country_code_format` | Warning | A supplied `countryCode` is not two uppercase letters. This is a format check, not a country-code lookup. |
 
 ## Shared coordinate checks
@@ -47,7 +47,9 @@ This reference describes the rules shipped in version 0.2.0. A warning is an adv
 
 ## Input formats and workbook handling
 
+- A header-only input is an error (`no_data_rows`); at least one data record is required.
 - CSV and TSV files are read as UTF-8 (with or without a byte-order mark).
+- All inputs are limited to 100 MB, 100,000 data rows, and 250 columns. Files exceeding a limit are rejected rather than partially validated.
 - Excel `.xlsx` support is optional and uses `openpyxl`; the default is the first worksheet. A worksheet can also be selected by exact name or zero-based index.
 - Formula cells are read using cached values when available. A formula without a saved result may be treated as an empty cell.
 - Excel workbook archive size and compression limits are applied as a defensive check before parsing. Legacy `.xls` and macro-enabled `.xlsm` files are not supported.
