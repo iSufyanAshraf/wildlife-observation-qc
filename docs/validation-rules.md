@@ -1,6 +1,6 @@
 # Validation rule reference
 
-This reference describes the rules shipped in version 0.2.0. A warning is an advisory completeness or consistency concern; an error means the supplied value violates a rule implemented by this tool. The severity is not a judgement about the ecological importance of the observation.
+This reference describes the rules shipped in version 0.3.0. A warning is an advisory completeness or consistency concern; an error means the supplied value violates a rule implemented by this tool. The severity is not a judgement about the ecological importance of the observation.
 
 ## Occurrence profile
 
@@ -61,3 +61,4 @@ This reference describes the rules shipped in version 0.2.0. A warning is an adv
 - `countryCode` validation checks shape only. It does not verify whether a code is officially assigned or matches the coordinates.
 - ISO date support covers common full dates, partial year/month values, datetimes, and common intervals. It is not a complete ISO 8601 parser.
 - Missing coordinates are warnings because some records intentionally have withheld or unavailable locations. Do not publish restricted locations to silence a warning.
+

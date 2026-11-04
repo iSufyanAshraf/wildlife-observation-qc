@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import hmac
 import html
 import json
 import re
+import secrets
 from email.parser import BytesParser
 from email.policy import default
 from http import HTTPStatus
@@ -63,6 +65,7 @@ footer{padding:20px 4px 0;color:var(--muted);font-size:12px}
 <h2>Validate a dataset</h2>
 <p class="sub">Choose a CSV, TSV, or Excel workbook. Your original file is not edited.</p>
 <form method="post" action="/validate" enctype="multipart/form-data">
+<input type="hidden" name="csrf_token" value="__CSRF_TOKEN__">
 <div class="field">
 <label for="file">Dataset file</label>
 <input id="file" name="file" type="file" accept=".csv,.tsv,.xlsx,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
@@ -157,9 +160,10 @@ def _parse_sheet_value(value: str) -> str | int | None:
 
 def make_handler(max_upload_bytes: int = 20 * 1024 * 1024) -> type[BaseHTTPRequestHandler]:
     """Create a request handler with a fixed, bounded in-memory upload size."""
+    csrf_token = secrets.token_urlsafe(32)
 
     class DashboardHandler(BaseHTTPRequestHandler):
-        server_version = "WildlifeQC/0.2"
+        server_version = "WildlifeQC/0.3"
         sys_version = ""
 
         def log_message(self, format: str, *args: object) -> None:
@@ -191,26 +195,13 @@ def make_handler(max_upload_bytes: int = 20 * 1024 * 1024) -> type[BaseHTTPReque
                 return False
             return host_name in {"127.0.0.1", "localhost"}
 
-        def _is_same_origin_post(self) -> bool:
-            # Browsers normally send Origin on form POSTs. When present, require
-            # an exact local origin (including port). For non-browser clients
-            # that omit Origin, reject an explicit cross-site Fetch Metadata flag.
-            origin = self.headers.get("Origin")
-            if not origin:
-                return self.headers.get("Sec-Fetch-Site", "").lower() != "cross-site"
-            try:
-                parsed_origin = urlsplit(origin)
-                host = urlsplit("//" + self.headers.get("Host", ""))
-                origin_port = parsed_origin.port or (80 if parsed_origin.scheme == "http" else None)
-                host_port = host.port or 80
-                return (
-                    parsed_origin.scheme == "http"
-                    and (parsed_origin.hostname or "").lower().rstrip(".") in {"127.0.0.1", "localhost"}
-                    and parsed_origin.hostname == host.hostname
-                    and origin_port == host_port
-                )
-            except ValueError:
-                return False
+        def _has_valid_csrf_token(self) -> bool:
+            # The per-server form token proves the request came from a page
+            # that could read the local dashboard, even when an embedded
+            # browser rewrites Origin or Fetch Metadata headers.
+            fields = getattr(self, "_post_fields", {})
+            submitted_token = _field_text(fields, "csrf_token").encode("utf-8")
+            return hmac.compare_digest(submitted_token, csrf_token.encode("ascii"))
 
         def do_GET(self) -> None:  # noqa: N802
             if not self._is_local_request():
@@ -218,14 +209,15 @@ def make_handler(max_upload_bytes: int = 20 * 1024 * 1024) -> type[BaseHTTPReque
                 return
             path = urlsplit(self.path).path
             if path == "/":
-                self._send(HTTPStatus.OK, _DASHBOARD_HTML.encode("utf-8"))
+                page = _DASHBOARD_HTML.replace("__CSRF_TOKEN__", html.escape(csrf_token, quote=True))
+                self._send(HTTPStatus.OK, page.encode("utf-8"))
             elif path == "/healthz":
                 self._send(HTTPStatus.OK, b"ok", "text/plain; charset=utf-8")
             else:
                 self._send(HTTPStatus.NOT_FOUND, b"Not found", "text/plain; charset=utf-8")
 
         def do_POST(self) -> None:  # noqa: N802
-            if not self._is_local_request() or not self._is_same_origin_post():
+            if not self._is_local_request():
                 self._send(HTTPStatus.FORBIDDEN, b"Local same-origin requests only", "text/plain; charset=utf-8")
                 return
             if urlsplit(self.path).path != "/validate":
@@ -248,7 +240,17 @@ def make_handler(max_upload_bytes: int = 20 * 1024 * 1024) -> type[BaseHTTPReque
                 return
 
             try:
-                fields = _parse_multipart(self.headers.get("Content-Type", ""), self.rfile.read(content_length))
+                self._post_fields = _parse_multipart(
+                    self.headers.get("Content-Type", ""), self.rfile.read(content_length)
+                )
+                if not self._has_valid_csrf_token():
+                    self._send(
+                        HTTPStatus.FORBIDDEN,
+                        b"Local same-origin requests only",
+                        "text/plain; charset=utf-8",
+                    )
+                    return
+                fields = self._post_fields
                 filename, file_data = fields.get("file", (None, b""))
                 if not filename or not file_data:
                     raise ValueError("Choose a non-empty CSV, TSV, or .xlsx file.")
@@ -296,3 +298,4 @@ def start_dashboard(port: int = 8765, max_upload_mb: int = 20) -> None:
         print("\nStopping Wildlife Observation QC dashboard.")
     finally:
         server.server_close()
+

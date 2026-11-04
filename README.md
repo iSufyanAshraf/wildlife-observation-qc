@@ -75,7 +75,7 @@ Open the browser dashboard on your own computer:
 wildlife-qc web
 ```
 
-Then visit `http://127.0.0.1:8765` in your browser. The dashboard binds to loopback only; it is not exposed to your local network or the public internet. It processes uploads in memory, enforces a 20 MB per-file limit by default, and provides an HTML view plus a downloadable JSON report. Stop it with `Ctrl+C`. Set a different port or upload limit with `--port` and `--max-upload-mb`. The validator also enforces hard limits of 100 MB per input file, 100,000 data rows, and 250 columns for both CSV/TSV and Excel inputs; the dashboard's configurable upload limit cannot exceed 100 MB.
+Then visit `http://127.0.0.1:8765` in your browser. The dashboard binds to loopback only; it is not exposed to your local network or the public internet. It processes uploads in memory, enforces a 20 MB per-file limit by default, and provides an HTML view plus a downloadable JSON report. Upload forms use a per-server CSRF token as well as local request checks, including when an embedded browser rewrites the `Origin` header. Stop it with `Ctrl+C`. Set a different port or upload limit with `--port` and `--max-upload-mb`. The validator also enforces hard limits of 100 MB per input file, 100,000 data rows, and 250 columns for both CSV/TSV and Excel inputs; the dashboard's configurable upload limit cannot exceed 100 MB.
 
 Require project-specific fields and generate a report:
 
@@ -150,3 +150,4 @@ Roadmap items are proposals, not current capabilities.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
