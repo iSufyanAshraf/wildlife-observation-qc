@@ -265,6 +265,9 @@ def test_local_dashboard_serves_form_and_validates_upload_in_memory():
             assert response.status == 200
             assert "no cloud upload" in page
             assert "127.0.0.1" not in page
+        import re
+
+        csrf_token = re.search(r'name="csrf_token" value="([^"]+)"', page).group(1)
 
         rejected_host = Request(base_url, headers={"Host": "example.com"})
         try:
@@ -280,11 +283,21 @@ def test_local_dashboard_serves_form_and_validates_upload_in_memory():
         )
         body = b"".join(
             [
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"csrf_token\"\r\n\r\n{csrf_token}\r\n".encode(),
                 f"--{boundary}\r\nContent-Disposition: form-data; name=\"profile\"\r\n\r\noccurrence\r\n".encode(),
                 f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"observations.csv\"\r\nContent-Type: text/csv\r\n\r\n".encode(),
                 csv_data,
                 f"\r\n--{boundary}--\r\n".encode(),
             ]
+        )
+        body_without_csrf_token = body.replace(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"csrf_token\"\r\n\r\n{csrf_token}\r\n".encode(),
+            b"",
+        )
+        body_with_invalid_csrf_token = body.replace(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"csrf_token\"\r\n\r\n{csrf_token}\r\n".encode(),
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"csrf_token\"\r\n\r\n".encode()
+            + b"\xff\r\n",
         )
         request = Request(
             base_url + "/validate",
@@ -292,6 +305,10 @@ def test_local_dashboard_serves_form_and_validates_upload_in_memory():
             headers={
                 "Content-Type": f"multipart/form-data; boundary={boundary}",
                 "Origin": base_url,
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-User": "?1",
             },
             method="POST",
         )
@@ -304,16 +321,88 @@ def test_local_dashboard_serves_form_and_validates_upload_in_memory():
 
         cross_site_request = Request(
             base_url + "/validate",
-            data=body,
+            data=body_without_csrf_token,
             headers={
                 "Content-Type": f"multipart/form-data; boundary={boundary}",
                 "Origin": "http://attacker.example",
+                "Sec-Fetch-Site": "cross-site",
             },
             method="POST",
         )
         try:
             urlopen(cross_site_request)
             raise AssertionError("The dashboard should reject cross-origin form submissions.")
+        except Exception as exc:
+            assert getattr(exc, "code", None) == 403
+
+        invalid_token_request = Request(
+            base_url + "/validate",
+            data=body_with_invalid_csrf_token,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Origin": base_url,
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-User": "?1",
+            },
+            method="POST",
+        )
+        try:
+            urlopen(invalid_token_request)
+            raise AssertionError("The dashboard should reject a malformed CSRF token.")
+        except Exception as exc:
+            assert getattr(exc, "code", None) == 403
+
+        embedded_browser_request = Request(
+            base_url + "/validate",
+            data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Origin": "http://127.0.0.1",
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-User": "?1",
+            },
+            method="POST",
+        )
+        with urlopen(embedded_browser_request) as response:
+            result = response.read().decode("utf-8")
+            assert response.status == 200
+            assert "Wildlife Data Quality Report" in result
+
+        opaque_origin_request = Request(
+            base_url + "/validate",
+            data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Origin": "null",
+                "Sec-Fetch-Site": "cross-site",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-User": "?1",
+            },
+            method="POST",
+        )
+        with urlopen(opaque_origin_request) as response:
+            result = response.read().decode("utf-8")
+            assert response.status == 200
+            assert "Wildlife Data Quality Report" in result
+
+        request_without_csrf_token = Request(
+            base_url + "/validate",
+            data=body_without_csrf_token,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Origin": base_url,
+                "Sec-Fetch-Site": "same-origin",
+            },
+            method="POST",
+        )
+        try:
+            urlopen(request_without_csrf_token)
+            raise AssertionError("The dashboard should reject submissions without its form token.")
         except Exception as exc:
             assert getattr(exc, "code", None) == 403
     finally:
@@ -422,4 +511,5 @@ def test_cli_can_select_excel_worksheet(tmp_path: Path, capsys):
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "Rows checked: 1" in output
+
 
