@@ -513,3 +513,194 @@ def test_cli_can_select_excel_worksheet(tmp_path: Path, capsys):
     assert "Rows checked: 1" in output
 
 
+_SYNTHETIC_GEOJSON_BOUNDARY = (
+    b'{"type":"MultiPolygon","coordinates":['
+    b'[[[0,0],[4,0],[4,4],[0,4],[0,0]],[[1,1],[3,1],[3,3],[1,3],[1,1]]],'
+    b'[[[10,0],[14,0],[14,4],[10,4],[10,0]]]]}'
+)
+
+
+def _spatial_csv(*rows: str) -> bytes:
+    header = (
+        "occurrenceID,scientificName,basisOfRecord,eventDate,decimalLatitude,"
+        "decimalLongitude,geodeticDatum\n"
+    )
+    return (header + "\n".join(rows) + "\n").encode()
+
+
+def test_geojson_boundary_checks_wgs84_lon_lat_holes_and_edges():
+    from wildlife_qc.validator import validate_bytes
+
+    data = _spatial_csv(
+        "inside,Axis axis,HumanObservation,2026-01-01,0.5,0.5,WGS84",
+        "hole,Axis axis,HumanObservation,2026-01-01,2,2,WGS84",
+        "second-polygon,Axis axis,HumanObservation,2026-01-01,2,12,WGS84",
+        "edge,Axis axis,HumanObservation,2026-01-01,2,0,WGS84",
+    )
+    report = validate_bytes(data, filename="synthetic.csv", boundary_geojson=_SYNTHETIC_GEOJSON_BOUNDARY)
+
+    outside = [issue for issue in report.issues if issue.code == "spatial_outside_boundary"]
+    assert [(issue.severity, issue.row, issue.field) for issue in outside] == [
+        ("warning", 3, "decimalLatitude/decimalLongitude")
+    ]
+    assert report.errors == 0
+    assert report.passed
+    assert "2,2" not in str(report.to_dict())
+
+
+def test_geojson_boundary_requires_wgs84_polygon_geometry():
+    from wildlife_qc.validator import validate_bytes
+
+    csv_data = _spatial_csv("synthetic,Axis axis,HumanObservation,2026-01-01,1,1,WGS84")
+    wrong_crs = (
+        b'{"type":"Polygon","crs":{"type":"name","properties":{"name":"EPSG:3857"}},'
+        b'"coordinates":[[[0,0],[1,0],[1,1],[0,1],[0,0]]]}\n'
+    )
+    bad_geometry = (
+        b'{"type":"Polygon","coordinates":[[[0,0],[2,2],[0,2],[2,0],[0,0]]]}\n'
+    )
+
+    for geojson in (wrong_crs, bad_geometry):
+        report = validate_bytes(csv_data, boundary_geojson=geojson)
+        assert "spatial_boundary_invalid" in {issue.code for issue in report.issues}
+        assert report.errors == 1
+
+
+def test_geojson_boundary_reports_missing_optional_gis_dependency(monkeypatch):
+    import builtins
+
+    from wildlife_qc.validator import validate_bytes
+
+    original_import = builtins.__import__
+
+    def import_without_shapely(name, *args, **kwargs):
+        if name.startswith("shapely"):
+            raise ImportError("synthetic missing dependency")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_shapely)
+    report = validate_bytes(
+        _spatial_csv("synthetic,Axis axis,HumanObservation,2026-01-01,1,1,WGS84"),
+        boundary_geojson=_SYNTHETIC_GEOJSON_BOUNDARY,
+    )
+    assert "spatial_dependency_missing" in {issue.code for issue in report.issues}
+
+
+def test_xlsx_validation_applies_geojson_boundary():
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    from wildlife_qc.validator import validate_bytes
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(
+        [
+            "occurrenceID",
+            "scientificName",
+            "basisOfRecord",
+            "eventDate",
+            "decimalLatitude",
+            "decimalLongitude",
+            "geodeticDatum",
+        ]
+    )
+    sheet.append(["synthetic", "Axis axis", "HumanObservation", "2026-01-01", 2, 2, "WGS84"])
+    buffer = BytesIO()
+    workbook.save(buffer)
+    workbook.close()
+
+    report = validate_bytes(
+        buffer.getvalue(), filename="synthetic.xlsx", boundary_geojson=_SYNTHETIC_GEOJSON_BOUNDARY
+    )
+    assert [(issue.code, issue.severity, issue.row) for issue in report.issues if issue.code.startswith("spatial_")] == [
+        ("spatial_outside_boundary", "warning", 2)
+    ]
+
+
+def test_cli_accepts_a_local_geojson_boundary(tmp_path: Path, capsys):
+    from wildlife_qc.cli import main
+
+    source = tmp_path / "synthetic.csv"
+    boundary = tmp_path / "boundary.geojson"
+    source.write_bytes(_spatial_csv("synthetic,Axis axis,HumanObservation,2026-01-01,2,2,WGS84"))
+    boundary.write_bytes(_SYNTHETIC_GEOJSON_BOUNDARY)
+
+    exit_code = main(["validate", str(source), "--boundary", str(boundary)])
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "spatial_outside_boundary" in output
+    assert "coordinate point falls outside" in output
+
+
+def test_missing_local_boundary_path_is_reported_as_an_error(tmp_path: Path):
+    from wildlife_qc.validator import validate_file
+
+    source = tmp_path / "synthetic.csv"
+    source.write_bytes(_spatial_csv("synthetic,Axis axis,HumanObservation,2026-01-01,1,1,WGS84"))
+    report = validate_file(source, boundary_path=tmp_path / "missing.geojson")
+
+    issue = next(issue for issue in report.issues if issue.code == "spatial_boundary_unreadable")
+    assert issue.severity == "error"
+    assert issue.field == "boundary"
+    assert issue.suggestion
+
+
+def test_local_dashboard_accepts_an_in_memory_geojson_boundary_upload():
+    import threading
+    from http.server import ThreadingHTTPServer
+    from urllib.request import Request, urlopen
+
+    from wildlife_qc.web import make_handler
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(max_upload_bytes=1024 * 1024))
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+        with urlopen(base_url) as response:
+            page = response.read().decode("utf-8")
+        assert 'name="boundary_file"' in page
+        import re
+
+        csrf_token = re.search(r'name="csrf_token" value="([^"]+)"', page).group(1)
+        boundary = "----wildlife-qc-geojson-boundary"
+        csv_data = _spatial_csv(
+            "synthetic,Axis axis,HumanObservation,2026-01-01,2,2,WGS84"
+        )
+        body = b"".join(
+            [
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"csrf_token\"\r\n\r\n{csrf_token}\r\n".encode(),
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"synthetic.csv\"\r\nContent-Type: text/csv\r\n\r\n".encode(),
+                csv_data,
+                f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"boundary_file\"; filename=\"boundary.geojson\"\r\nContent-Type: application/geo+json\r\n\r\n".encode(),
+                _SYNTHETIC_GEOJSON_BOUNDARY,
+                f"\r\n--{boundary}--\r\n".encode(),
+            ]
+        )
+        request = Request(
+            base_url + "/validate",
+            data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Origin": base_url,
+                "Sec-Fetch-Site": "same-origin",
+                "Sec-Fetch-Mode": "navigate",
+                "Sec-Fetch-Dest": "document",
+                "Sec-Fetch-User": "?1",
+            },
+            method="POST",
+        )
+        with urlopen(request) as response:
+            result = response.read().decode("utf-8")
+        assert response.status == 200
+        assert "spatial_outside_boundary" in result
+        assert "coordinate point falls outside" in result
+        assert "Axis axis" not in result
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=2)
+
+
