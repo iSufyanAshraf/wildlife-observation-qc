@@ -27,6 +27,7 @@ Wildlife census and biodiversity datasets often combine field sheets, GPS export
 | Sampling effort and duration units | — | ✓ |
 | Additional project-specific required columns | ✓ | ✓ |
 | Excel `.xlsx` worksheets (optional `excel` extra) | ✓ | ✓ |
+| Optional user-supplied GeoJSON boundary check (optional `gis` extra) | ✓ | ✓ |
 
 The validator intentionally reports issues rather than attempting automatic repairs. It is a practical pre-flight check, not a complete Darwin Core or GBIF conformance validator, a taxonomic authority, or a substitute for expert review.
 
@@ -46,6 +47,12 @@ For development:
 
 ```bash
 python -m pip install -e ".[dev]"
+```
+
+For optional local polygon boundary checks, install the GIS extra:
+
+```bash
+python -m pip install "wildlife-observation-qc[gis]"
 ```
 
 ## Quick start
@@ -69,13 +76,21 @@ wildlife-qc validate field-survey.xlsx --sheet "Occurrence Data"
 wildlife-qc validate field-survey.xlsx --sheet 1 --profile occurrence
 ```
 
+Compare valid coordinates with a local GeoJSON boundary:
+
+```bash
+wildlife-qc validate observations.csv --boundary survey-boundary.geojson
+```
+
+Boundary checks accept GeoJSON `Polygon` and `MultiPolygon` geometries in a `Feature`, `FeatureCollection`, or direct geometry document. Coordinates must use RFC 7946 WGS84 longitude/latitude order; the tool does not reproject boundary data. The optional `--boundary` argument can also be used with `.xlsx` files. A point outside the selected boundary is a **warning** for review, not evidence that the record is ecologically invalid. Points on the polygon edge count as covered, and polygon holes count as outside. Boundary inputs are limited to 10 MB.
+
 Open the browser dashboard on your own computer:
 
 ```bash
 wildlife-qc web
 ```
 
-Then visit `http://127.0.0.1:8765` in your browser. The dashboard binds to loopback only; it is not exposed to your local network or the public internet. It processes uploads in memory, enforces a 20 MB per-file limit by default, and provides an HTML view plus a downloadable JSON report. Upload forms use a per-server CSRF token as well as local request checks, including when an embedded browser rewrites the `Origin` header. Stop it with `Ctrl+C`. Set a different port or upload limit with `--port` and `--max-upload-mb`. The validator also enforces hard limits of 100 MB per input file, 100,000 data rows, and 250 columns for both CSV/TSV and Excel inputs; the dashboard's configurable upload limit cannot exceed 100 MB.
+Then visit `http://127.0.0.1:8765` in your browser. The dashboard binds to loopback only; it is not exposed to your local network or the public internet. It processes uploads in memory, enforces a 20 MB per data-file limit by default, and provides an HTML view plus a downloadable JSON report. Upload forms use a per-server CSRF token as well as local request checks, including when an embedded browser rewrites the `Origin` header. You can optionally select a local GeoJSON boundary file; it requires the `gis` extra, is checked in memory, and is limited to 10 MB. Stop the dashboard with `Ctrl+C`. Set a different port or data upload limit with `--port` and `--max-upload-mb`. The validator also enforces hard limits of 100 MB per input file, 100,000 data rows, and 250 columns for CSV/TSV and Excel inputs; the dashboard's configurable data-file limit cannot exceed 100 MB.
 
 Require project-specific fields and generate a report:
 
@@ -139,10 +154,10 @@ Contributions should include a synthetic fixture or unit test for each new rule.
 - [x] Text, JSON, and HTML reports
 - [x] Optional Excel `.xlsx` workbook support
 - [x] Local-only browser dashboard
+- [x] Optional spatial checks against user-supplied, locally stored GeoJSON boundaries
 - [x] CI tests across supported Python versions
 - [ ] Darwin Core Archive (`meta.xml` + core/extension CSV) support
 - [ ] Optional taxonomy cross-checking against a user-selected authority
-- [ ] Optional spatial checks against user-supplied, locally stored survey boundaries
 - [ ] Configurable rule packs for national wildlife census workflows
 
 Roadmap items are proposals, not current capabilities.
