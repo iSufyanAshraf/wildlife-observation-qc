@@ -24,6 +24,11 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--profile", choices=PROFILES, default="occurrence", help="validation profile (default: occurrence)")
     validate.add_argument("--required-field", action="append", default=[], metavar="FIELD", help="require an additional column; repeat as needed")
     validate.add_argument("--sheet", help="Excel worksheet name or zero-based index (default: first worksheet)")
+    validate.add_argument(
+        "--boundary",
+        type=Path,
+        help="optional local WGS84 GeoJSON Polygon/MultiPolygon boundary (requires the gis extra)",
+    )
     validate.add_argument("--format", choices=("text", "json", "html"), default="text", help="report format written to stdout")
     validate.add_argument("--output", type=Path, help="optional report output path (.json or .html)")
     validate.add_argument("--fail-on", choices=("error", "warning", "never"), default="error", help="exit with code 1 at or above this severity")
@@ -44,7 +49,13 @@ def main(argv: list[str] | None = None) -> int:
     sheet: str | int | None = args.sheet
     if isinstance(sheet, str) and sheet.isdecimal():
         sheet = int(sheet)
-    report = validate_file(args.input, profile=args.profile, required_fields=args.required_field, sheet=sheet)
+    report = validate_file(
+        args.input,
+        profile=args.profile,
+        required_fields=args.required_field,
+        sheet=sheet,
+        boundary_path=args.boundary,
+    )
     renderers = {"text": render_text, "json": render_json, "html": render_html}
     output = renderers[args.format](report)
     if args.output:
@@ -78,3 +89,4 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

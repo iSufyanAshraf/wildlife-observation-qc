@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 from .render import render_html
+from .spatial import MAX_BOUNDARY_BYTES
 from .validator import PROFILES, validate_bytes
 
 _DASHBOARD_HTML = """<!doctype html>
@@ -70,6 +71,11 @@ footer{padding:20px 4px 0;color:var(--muted);font-size:12px}
 <label for="file">Dataset file</label>
 <input id="file" name="file" type="file" accept=".csv,.tsv,.xlsx,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
 <span class="hint">Supported formats: UTF-8 CSV/TSV and .xlsx. Maximum upload size is enforced by the local server.</span>
+</div>
+<div class="field" style="margin-top:19px">
+<label for="boundary_file">Survey boundary (optional)</label>
+<input id="boundary_file" name="boundary_file" type="file" accept=".geojson,.json,application/geo+json,application/json">
+<span class="hint">Optional local GeoJSON Polygon or MultiPolygon using WGS84 longitude, latitude order. Requires the GIS extra; processed in memory.</span>
 </div>
 <div class="grid" style="margin-top:19px">
 <div class="field">
@@ -234,7 +240,7 @@ def make_handler(max_upload_bytes: int = 20 * 1024 * 1024) -> type[BaseHTTPReque
                 status, body = _error_page("Choose a file before submitting the form.")
                 self._send(status, body)
                 return
-            if content_length > max_upload_bytes + 1024 * 1024:
+            if content_length > max_upload_bytes + MAX_BOUNDARY_BYTES + 1024 * 1024:
                 status, body = _error_page("The upload exceeds the configured size limit.", HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
                 self._send(status, body)
                 return
@@ -267,12 +273,14 @@ def make_handler(max_upload_bytes: int = 20 * 1024 * 1024) -> type[BaseHTTPReque
                     if field.strip()
                 ]
                 sheet = _parse_sheet_value(_field_text(fields, "sheet"))
+                boundary_filename, boundary_data = fields.get("boundary_file", (None, b""))
                 report = validate_bytes(
                     file_data,
                     filename=filename,
                     profile=profile,
                     required_fields=required_fields,
                     sheet=sheet,
+                    boundary_geojson=boundary_data if boundary_filename else None,
                 )
                 self._send(HTTPStatus.OK, _report_page(report).encode("utf-8"))
             except (ValueError, UnicodeError, OSError) as exc:

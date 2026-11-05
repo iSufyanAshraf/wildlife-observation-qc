@@ -17,6 +17,13 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from .models import Issue, Severity, ValidationReport
+from .spatial import (
+    MAX_BOUNDARY_BYTES,
+    BoundaryDependencyError,
+    BoundaryError,
+    SpatialBoundary,
+    load_geojson_boundary,
+)
 
 PROFILES = ("occurrence", "camera-trap")
 
@@ -244,7 +251,40 @@ def _check_coordinates(
             )
 
 
-def _validate_occurrence(rows: list[dict[str, str]], report: ValidationReport) -> None:
+def _check_boundary(
+    row_data: Mapping[str, str],
+    report: ValidationReport,
+    row_number: int,
+    boundary: SpatialBoundary | None,
+) -> None:
+    if boundary is None:
+        return
+    latitude = _number(row_data.get("decimalLatitude", ""))
+    longitude = _number(row_data.get("decimalLongitude", ""))
+    if (
+        latitude is None
+        or longitude is None
+        or math.isnan(latitude)
+        or math.isnan(longitude)
+        or not -90 <= latitude <= 90
+        or not -180 <= longitude <= 180
+    ):
+        return
+    if not boundary.covers(longitude, latitude):
+        _issue(
+            report,
+            "warning",
+            "spatial_outside_boundary",
+            "The coordinate point falls outside the supplied boundary polygon.",
+            "Check the coordinate values, WGS84 longitude/latitude order, and selected boundary; this check does not determine whether an observation is ecologically valid.",
+            row_number,
+            "decimalLatitude/decimalLongitude",
+        )
+
+
+def _validate_occurrence(
+    rows: list[dict[str, str]], report: ValidationReport, boundary: SpatialBoundary | None = None
+) -> None:
     ids: dict[str, int] = {}
     for row_number, row in enumerate(rows, start=2):
         occurrence_id = row.get("occurrenceID", "").strip()
@@ -289,9 +329,12 @@ def _validate_occurrence(rows: list[dict[str, str]], report: ValidationReport) -
             _issue(report, "warning", "country_code_format", "countryCode should use a two-letter uppercase country code.", "Use an ISO 3166-1 alpha-2 code such as PK; verify the country independently.", row_number, "countryCode")
 
         _check_coordinates(row, report, row_number)
+        _check_boundary(row, report, row_number, boundary)
 
 
-def _validate_camera_trap(rows: list[dict[str, str]], report: ValidationReport) -> None:
+def _validate_camera_trap(
+    rows: list[dict[str, str]], report: ValidationReport, boundary: SpatialBoundary | None = None
+) -> None:
     for row_number, row in enumerate(rows, start=2):
         if _blank(row.get("eventID", "")):
             _issue(report, "error", "event_id_missing", "eventID is missing for this camera-trap survey row.", "Assign a stable identifier to the deployment or sampling event.", row_number, "eventID")
@@ -325,6 +368,7 @@ def _validate_camera_trap(rows: list[dict[str, str]], report: ValidationReport) 
                 _issue(report, "warning", "event_duration_unit_missing", "eventDurationValue is supplied without eventDurationUnit.", "Add a duration unit such as hours or days.", row_number, "eventDurationUnit")
 
         _check_coordinates(row, report, row_number)
+        _check_boundary(row, report, row_number, boundary)
 
 
 def validate_rows(
@@ -333,6 +377,7 @@ def validate_rows(
     source: str = "<memory>",
     columns: Iterable[str] | None = None,
     required_fields: Iterable[str] = (),
+    boundary: SpatialBoundary | None = None,
 ) -> ValidationReport:
     """Validate already-loaded records. Row numbers start at 2, like CSV files."""
     if profile not in PROFILES:
@@ -359,9 +404,9 @@ def validate_rows(
             _issue(report, "error", "required_column_missing", f"Required column '{canonical}' is missing.", f"Add a '{canonical}' column to the CSV header.", None, canonical)
 
     if profile == "occurrence":
-        _validate_occurrence(normalized_rows, report)
+        _validate_occurrence(normalized_rows, report, boundary)
     else:
-        _validate_camera_trap(normalized_rows, report)
+        _validate_camera_trap(normalized_rows, report, boundary)
     return report
 
 
@@ -371,6 +416,7 @@ def _parse_csv_text(
     report: ValidationReport,
     profile: str,
     required_fields: Iterable[str],
+    boundary: SpatialBoundary | None,
 ) -> ValidationReport:
     if not text.strip():
         _issue(report, "error", "file_empty", "The input file is empty.", "Provide a CSV with a header row and at least one data row.")
@@ -416,6 +462,7 @@ def _parse_csv_text(
             source=report.source,
             columns=headers,
             required_fields=required_fields,
+            boundary=boundary,
         )
         validated.issues[:0] = report.issues
         return validated
@@ -430,6 +477,7 @@ def _parse_excel_bytes(
     profile: str,
     required_fields: Iterable[str],
     sheet: str | int | None,
+    boundary: SpatialBoundary | None,
 ) -> ValidationReport:
     try:
         from openpyxl import load_workbook
@@ -542,6 +590,7 @@ def _parse_excel_bytes(
             source=report.source,
             columns=headers,
             required_fields=required_fields,
+            boundary=boundary,
         )
         validated.issues[:0] = report.issues
         return validated
@@ -555,20 +604,45 @@ def validate_bytes(
     profile: str = "occurrence",
     required_fields: Iterable[str] = (),
     sheet: str | int | None = None,
+    boundary_geojson: bytes | None = None,
 ) -> ValidationReport:
-    """Validate CSV/TSV or XLSX bytes without writing the input to disk."""
+    """Validate CSV/TSV or XLSX bytes and an optional in-memory GeoJSON boundary."""
     if profile not in PROFILES:
         raise ValueError(f"Unknown profile '{profile}'. Choose one of: {', '.join(PROFILES)}")
 
     file_name = filename.replace("\\", "/").rsplit("/", 1)[-1] or "upload.csv"
     report = ValidationReport(source=file_name, profile=profile)
+    boundary = None
+    if boundary_geojson is not None:
+        try:
+            boundary = load_geojson_boundary(boundary_geojson)
+        except BoundaryDependencyError:
+            _issue(
+                report,
+                "error",
+                "spatial_dependency_missing",
+                "GIS boundary checks require the optional Shapely dependency.",
+                'Install it with: python -m pip install "wildlife-observation-qc[gis]".',
+                None,
+                "boundary",
+            )
+        except BoundaryError as exc:
+            _issue(
+                report,
+                "error",
+                "spatial_boundary_invalid",
+                str(exc),
+                "Choose a valid GeoJSON Polygon or MultiPolygon boundary using WGS84 longitude/latitude coordinates.",
+                None,
+                "boundary",
+            )
     if len(data) > MAX_INPUT_BYTES:
         _issue(report, "error", "input_too_large", "The input file exceeds the maximum supported size.", f"Use a file no larger than {MAX_INPUT_BYTES // (1024 * 1024)} MB.")
         return report
     suffix = Path(file_name).suffix.casefold()
 
     if suffix == ".xlsx":
-        return _parse_excel_bytes(data, report, profile, required_fields, sheet)
+        return _parse_excel_bytes(data, report, profile, required_fields, sheet, boundary)
     if suffix not in {".csv", ".tsv", ".txt"}:
         _issue(
             report,
@@ -584,7 +658,7 @@ def validate_bytes(
     except UnicodeDecodeError:
         _issue(report, "error", "encoding_unsupported", "The file is not valid UTF-8 text.", "Export the CSV as UTF-8 or UTF-8 with BOM.")
         return report
-    return _parse_csv_text(text, report, profile, required_fields)
+    return _parse_csv_text(text, report, profile, required_fields, boundary)
 
 
 def validate_file(
@@ -592,6 +666,7 @@ def validate_file(
     profile: str = "occurrence",
     required_fields: Iterable[str] = (),
     sheet: str | int | None = None,
+    boundary_path: str | Path | None = None,
 ) -> ValidationReport:
     """Read a CSV/TSV or XLSX file without modifying the source."""
     file_path = Path(path)
@@ -612,5 +687,43 @@ def validate_file(
         report = ValidationReport(source=file_path.name, profile=profile)
         _issue(report, "error", "file_unreadable", f"Could not read the input file ({type(exc).__name__}).", "Check file permissions and whether another process is locking the file.")
         return report
-    return validate_bytes(data, filename=file_path.name, profile=profile, required_fields=required_fields, sheet=sheet)
+    boundary_data = None
+    boundary_issue: Issue | None = None
+    if boundary_path is not None:
+        boundary_file = Path(boundary_path)
+        try:
+            if not boundary_file.is_file():
+                raise OSError("file does not exist")
+            if boundary_file.stat().st_size > MAX_BOUNDARY_BYTES:
+                boundary_issue = Issue(
+                    "error",
+                    "spatial_boundary_invalid",
+                    "The GeoJSON boundary exceeds the 10 MB safety limit.",
+                    "Choose a smaller GeoJSON polygon boundary.",
+                    None,
+                    "boundary",
+                )
+            else:
+                boundary_data = boundary_file.read_bytes()
+        except OSError:
+            boundary_issue = Issue(
+                "error",
+                "spatial_boundary_unreadable",
+                "The selected GeoJSON boundary file could not be read.",
+                "Check that the boundary path exists and is readable, then try again.",
+                None,
+                "boundary",
+            )
+    report = validate_bytes(
+        data,
+        filename=file_path.name,
+        profile=profile,
+        required_fields=required_fields,
+        sheet=sheet,
+        boundary_geojson=boundary_data,
+    )
+    if boundary_issue is not None:
+        report.issues.insert(0, boundary_issue)
+    return report
+
 
