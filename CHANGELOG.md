@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased — Phase 2 GIS validation
+
+- Add optional local GeoJSON Polygon/MultiPolygon boundary checks with WGS84 longitude/latitude semantics.
+- Add CLI and dashboard boundary selection, size limits, clear validation errors, and outside-boundary warnings.
+- Keep GIS processing local and in memory; Shapely remains an optional dependency.
+
 ## 0.3.0 — 2026-11-04
 
 - Reject header-only datasets instead of reporting a pass with zero records.
