@@ -1,6 +1,6 @@
 # Validation rule reference
 
-This reference describes the rules shipped in version 0.3.0. A warning is an advisory completeness or consistency concern; an error means the supplied value violates a rule implemented by this tool. The severity is not a judgement about the ecological importance of the observation.
+This reference covers the rules in the v0.3.0 release and unreleased Phase 2 checks currently on `main`. A warning is an advisory completeness or consistency concern; an error means the supplied value violates a rule implemented by this tool. The severity is not a judgement about the ecological importance of the observation.
 
 ## Occurrence profile
 
